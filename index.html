@@ -144,7 +144,6 @@
         aria-label="Visualización animada de una IA de voz"
         role="img"
       ></canvas>
-      <div id="status" aria-live="polite"></div>
     </div>
     <div class="cosas" id="cosas" style="display: none">
       <div id="camera-buttons" style="margin-top: 8px"></div>
@@ -533,7 +532,6 @@
       function setPressed(group, attr, val) {}
       function setState(s) {
         state = s;
-        statusEl.innerHTML = LABELS[s];
         setPressed(document.getElementById("states"), "s", s);
       }
 
