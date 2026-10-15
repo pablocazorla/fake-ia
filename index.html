@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Visualizador de voz IA</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0c0d1a;
+        --fg: #e8eaf6;
+        --mut: #8b8fb0;
+        --line: #2a2c4a;
+        --acc: #7b5cff;
+        box-sizing: border-box;
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: radial-gradient(
+          120% 90% at 50% 40%,
+          #16183a 0%,
+          var(--bg) 70%
+        );
+        color: var(--fg);
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .title {
+        text-align: center;
+        font-family: Verdana, Geneva, Tahoma, sans-serif;
+        font-weight: normal;
+        font-size: 40px;
+        padding: 40px;
+        margin: 0;
+        line-height: 40px;
+      }
+      #stage {
+        flex: 1;
+        position: relative;
+        min-height: 0;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #status {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 6%;
+        text-align: center;
+        font-size: 1.05rem;
+        color: var(--mut);
+        letter-spacing: 0.01em;
+        transition: color 0.4s;
+      }
+      #status b {
+        color: var(--fg);
+        font-weight: 500;
+      }
+      .bar {
+        display: flex;
+        width: 100%;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 0 16px 16px;
+        button {
+          font-size: 70px;
+          padding: 0;
+          line-height: 40px;
+        }
+      }
+      .grp {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      button {
+        font: inherit;
+        font-size: 0.9rem;
+        color: var(--mut);
+        background: none;
+        border: 0;
+        border-radius: 999px;
+        padding: 8px 16px;
+        cursor: pointer;
+        transition:
+          background 0.2s,
+          color 0.2s;
+      }
+      button:hover {
+        color: var(--fg);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--acc);
+        outline-offset: 2px;
+      }
+      button[aria-pressed="true"] {
+        background: var(--acc);
+        color: #fff;
+      }
+      .cosas {
+        height: 450px;
+        padding: 20px;
+      }
+      .video {
+        width: 100%;
+        height: 100%;
+        background-color: black;
+        border-radius: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 class="title" id="title">Marce</h1>
+    <div id="stage">
+      <canvas
+        id="c"
+        aria-label="Visualización animada de una IA de voz"
+        role="img"
+      ></canvas>
+      <div id="status" aria-live="polite"></div>
+    </div>
+    <div class="cosas" id="cosas" style="display: none">
+      <video id="cam" class="video" autoplay muted playsinline></video>
+    </div>
+    <div class="bar">
+      <button id="states-change">·</button>
+      <button id="video-change">·</button>
+      <button id="styles-change">·</button>
+    </div>
+
+    <script>
+      const cv = document.getElementById("c"),
+        ctx = cv.getContext("2d");
+      const statusEl = document.getElementById("status");
+      let W = 0,
+        H = 0;
+      function resize() {
+        const dpr = Math.min(devicePixelRatio || 1, 2),
+          r = cv.getBoundingClientRect();
+        W = r.width;
+        H = r.height;
+        cv.width = W * dpr;
+        cv.height = H * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      addEventListener("resize", resize);
+      resize();
+
+      const LABELS = {
+        idle: "Hola, ¿cómo estás?",
+        listening: "<b>Escuchando…</b>",
+        thinking: "<b>Pensando…</b>",
+        speaking: "<b>Hablando</b>",
+      };
+      // Cada estado tiene su propia personalidad: color, tamaño, brillo, giro y dirección de las ondas
+      const CFG = {
+        idle: {
+          scale: 0.72,
+          glow: 0.15,
+          wob: 0.3,
+          spin: 0.25,
+          dir: 0.2,
+          pal: [
+            [96, 128, 176],
+            [110, 112, 190],
+            [84, 148, 170],
+          ],
+        },
+        listening: {
+          scale: 1.0,
+          glow: 0.6,
+          wob: 1,
+          spin: 0.6,
+          dir: 1,
+          pal: [
+            [59, 224, 200],
+            [56, 160, 255],
+            [130, 240, 255],
+          ],
+        },
+        thinking: {
+          scale: 0.68,
+          glow: 0.5,
+          wob: 0.5,
+          spin: 2.4,
+          dir: 0,
+          pal: [
+            [140, 90, 255],
+            [190, 80, 255],
+            [255, 111, 174],
+          ],
+        },
+        speaking: {
+          scale: 1.18,
+          glow: 1,
+          wob: 1.3,
+          spin: 1,
+          dir: -1,
+          pal: [
+            [255, 105, 160],
+            [255, 175, 80],
+            [170, 100, 255],
+          ],
+        },
+      };
+      let state = "listening",
+        view = "orb",
+        level = 0.1;
+      const cur = {
+        scale: 1,
+        glow: 0.6,
+        wob: 1,
+        spin: 0.6,
+        dir: 1,
+        pal: CFG.listening.pal.map((c) => c.slice()),
+      };
+      const w = { idle: 0, listening: 1, thinking: 0, speaking: 0 };
+      const ripples = [];
+      let nextRipple = 0,
+        cool = 0;
+
+      const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+      const nz = (a, t, k) =>
+        Math.sin(a * 2 + t * 1.3 * k) * 0.5 +
+        Math.sin(a * 3 - t * 0.9 * k + 1.7) * 0.3 +
+        Math.sin(a * 5 + t * 1.9 * k + 4) * 0.2;
+
+      // Envolvente de voz simulada (sílabas y pausas)
+      function targetLevel(t) {
+        const syll = Math.pow(
+          Math.max(0, Math.sin(t * 7.3) * Math.sin(t * 2.1 + 1) * 0.5 + 0.5),
+          1.5,
+        );
+        const word = Math.sin(t * 0.9) > -0.55 ? 1 : 0.08;
+        switch (state) {
+          case "idle":
+            return 0.03 + 0.015 * Math.sin(t * 1.2);
+          case "listening":
+            return 0.1 + 0.38 * syll * word * (0.6 + 0.4 * Math.sin(t * 0.37));
+          case "thinking":
+            return 0.08 + 0.05 * Math.sin(t * 3);
+          case "speaking":
+            return 0.2 + 0.7 * syll * word;
+        }
+      }
+
+      function lerpState() {
+        const g = CFG[state];
+        for (const k of ["scale", "glow", "wob", "spin", "dir"])
+          cur[k] += (g[k] - cur[k]) * 0.05;
+        for (let i = 0; i < 3; i++)
+          for (let j = 0; j < 3; j++)
+            cur.pal[i][j] += (g.pal[i][j] - cur.pal[i][j]) * 0.05;
+        for (const k in w) w[k] += ((k === state ? 1 : 0) - w[k]) * 0.06;
+      }
+
+      // Elementos propios de cada estado
+      function spawnRipples(t, dt, R) {
+        cool -= dt;
+        if (state === "listening" && t > nextRipple) {
+          ripples.push({ r: R * 3, dir: -1, life: 0 });
+          nextRipple = t + 1.1;
+        }
+        if (state === "speaking" && level > 0.6 && cool <= 0) {
+          ripples.push({ r: R * 1.15, dir: 1, life: 0 });
+          cool = 0.28;
+        }
+        for (let i = ripples.length - 1; i >= 0; i--) {
+          const p = ripples[i];
+          p.life += dt;
+          p.r +=
+            p.dir *
+            R *
+            (p.dir > 0 ? 1.7 : -1.5) *
+            dt *
+            (p.dir > 0 ? 1 : -1) *
+            (p.dir > 0 ? 1 : 1);
+          if (p.dir < 0) p.r = R * 3 - (R * 1.9 * p.life) / 1.25;
+          else p.r = R * 1.15 + (R * 1.9 * p.life) / 1.1;
+          if (p.life > (p.dir < 0 ? 1.25 : 1.1)) ripples.splice(i, 1);
+        }
+      }
+      function drawRipples(cx, cy, R) {
+        for (const p of ripples) {
+          const f = p.dir < 0 ? p.life / 1.25 : 1 - p.life / 1.1;
+          ctx.strokeStyle = rgba(cur.pal[0], Math.max(0, f) * 0.45);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, p.r, 0, 7);
+          ctx.stroke();
+        }
+      }
+      function drawOrbiters(t, cx, cy, R) {
+        if (w.thinking < 0.02) return;
+        for (let i = 0; i < 4; i++) {
+          const base = t * 2.6 + (i * Math.PI) / 2,
+            rad = R * (cur.scale + 0.55 + 0.12 * Math.sin(t * 2 + i));
+          for (let k = 0; k < 14; k++) {
+            const a = base - k * 0.075,
+              c = cur.pal[i % 3];
+            ctx.fillStyle = rgba(c, w.thinking * (1 - k / 14) * 0.9);
+            ctx.beginPath();
+            ctx.arc(
+              cx + Math.cos(a) * rad,
+              cy + Math.sin(a) * rad,
+              R * 0.05 * (1 - k / 18),
+              0,
+              7,
+            );
+            ctx.fill();
+          }
+        }
+      }
+
+      function drawOrb(t, cx, cy, R) {
+        ctx.globalCompositeOperation = "lighter";
+        const breath = 1 + 0.05 * Math.sin(t * 1.3) * (w.idle + 0.3);
+        drawRipples(cx, cy, R);
+        for (let l = 0; l < 3; l++) {
+          const col = cur.pal[l],
+            N = 120,
+            off = l * 2.1;
+          ctx.beginPath();
+          for (let i = 0; i <= N; i++) {
+            const a = (i / N) * Math.PI * 2;
+            const lobes =
+              nz(a + off, t * cur.spin, 1 + l * 0.25) *
+              (0.05 + level * 0.3) *
+              cur.wob;
+            const r =
+              R *
+              cur.scale *
+              breath *
+              (1 + lobes + w.thinking * 0.05 * Math.sin(t * 4 + l));
+            i
+              ? ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r)
+              : ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+          }
+          ctx.closePath();
+          const rr = R * cur.scale,
+            ox = Math.cos(t * cur.spin + l * 2) * rr * 0.25,
+            oy = Math.sin(t * cur.spin * 0.8 + l * 2) * rr * 0.25;
+          const g = ctx.createRadialGradient(
+            cx + ox,
+            cy + oy,
+            rr * 0.1,
+            cx,
+            cy,
+            rr * 1.3,
+          );
+          g.addColorStop(0, rgba(col, 0.35 + 0.55 * cur.glow));
+          g.addColorStop(1, rgba(col, 0));
+          ctx.fillStyle = g;
+          ctx.shadowColor = rgba(col, 0.6 * cur.glow);
+          ctx.shadowBlur = 45 * cur.glow;
+          ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+        const hr = R * cur.scale;
+        const h = ctx.createRadialGradient(
+          cx,
+          cy,
+          hr,
+          cx,
+          cy,
+          hr * (1.8 + level * 1.2),
+        );
+        h.addColorStop(
+          0,
+          rgba(cur.pal[1], (0.1 + level * 0.3) * cur.glow + 0.05),
+        );
+        h.addColorStop(1, rgba(cur.pal[1], 0));
+        ctx.fillStyle = h;
+        ctx.beginPath();
+        ctx.arc(cx, cy, hr * 3, 0, 7);
+        ctx.fill();
+        drawOrbiters(t, cx, cy, R);
+      }
+
+      function drawWaves(t, cx, cy, R) {
+        const wd = Math.min(W * 0.9, 900),
+          x0 = cx - wd / 2;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+        ctx.lineWidth = 2.5;
+        const amp = R * (0.05 + level * 1.3) * cur.wob;
+        const pos = Math.sin(t * 1.6) * 0.5 + 0.5; // barrido ida y vuelta al pensar
+        for (let l = 0; l < 5; l++) {
+          const col = cur.pal[l % 3],
+            f = 1.2 + l * 0.5,
+            sp = 1.3 + l * 0.35;
+          ctx.beginPath();
+          for (let i = 0; i <= 180; i++) {
+            const u = i / 180,
+              d = Math.abs(u - 0.5) * 2,
+              env = Math.pow(Math.sin(u * Math.PI), 2.4);
+            // dir>0: ondas viajan hacia el centro; dir<0: salen del centro
+            let y =
+              Math.sin(
+                d * Math.PI * f * 2 + t * sp * cur.dir * (1 + l * 0.1) + l,
+              ) *
+              amp *
+              env *
+              (1 - l * 0.14);
+            y +=
+              Math.sin(u * Math.PI * 8 - t * 3 + l) *
+              R *
+              0.05 *
+              env *
+              (w.idle * 0.6);
+            y +=
+              Math.exp(-Math.pow((u - pos) / 0.07, 2)) *
+              R *
+              0.85 *
+              (1 - l * 0.18) *
+              Math.sin(t * 9 + l) *
+              w.thinking;
+            i
+              ? ctx.lineTo(x0 + u * wd, cy + y)
+              : ctx.moveTo(x0 + u * wd, cy + y);
+          }
+          ctx.strokeStyle = rgba(
+            col,
+            (l === 0 ? 0.95 : 0.45) * (0.45 + 0.55 * cur.glow),
+          );
+          ctx.shadowColor = rgba(col, 0.8 * cur.glow);
+          ctx.shadowBlur = 16 * cur.glow;
+          ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+      }
+
+      function drawRing(t, cx, cy, R) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+        drawRipples(cx, cy, R);
+        const N = 96,
+          base = R * 0.85 * cur.scale + R * 0.1;
+        ctx.lineWidth = Math.max(2.5, R * 0.045);
+        const rot = t * cur.spin * (state === "thinking" ? 1.2 : 0.25);
+        for (let i = 0; i < N; i++) {
+          const a = (i / N) * Math.PI * 2 + rot;
+          let n = nz((i / N) * 12 + t, t, 1.4) * 0.5 + 0.5;
+          const comet = Math.pow(
+            Math.max(0, Math.cos((i / N) * Math.PI * 2 - t * 3)),
+            5,
+          ); // cola de cometa al pensar
+          n = n * (1 - w.thinking) + comet * w.thinking * 1.4;
+          const len =
+            R *
+            (0.05 +
+              (level * 1.2 * cur.wob + 0.03) * n * 1.1 +
+              w.thinking * 0.05);
+          const c = cur.pal[Math.floor((i / N) * 3) % 3];
+          ctx.strokeStyle = rgba(c, 0.35 + 0.6 * cur.glow);
+          ctx.shadowColor = rgba(c, 0.7 * cur.glow);
+          ctx.shadowBlur = 10 * cur.glow;
+          ctx.beginPath();
+          ctx.moveTo(cx + Math.cos(a) * base, cy + Math.sin(a) * base);
+          ctx.lineTo(
+            cx + Math.cos(a) * (base + len),
+            cy + Math.sin(a) * (base + len),
+          );
+          ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, base * 0.85);
+        g.addColorStop(
+          0,
+          rgba(cur.pal[0], (0.15 + level * 0.5) * cur.glow + 0.05),
+        );
+        g.addColorStop(1, rgba(cur.pal[1], 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(cx, cy, base * 0.85, 0, 7);
+        ctx.fill();
+      }
+
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      let last = performance.now(),
+        clock = 0;
+      function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        clock += dt * (reduce ? 0.3 : 1);
+        lerpState();
+        const tg = targetLevel(clock);
+        level += (tg - level) * (tg > level ? 0.3 : 0.09);
+        const cx = W / 2,
+          cy = H * 0.45,
+          R = Math.min(W, H) * 0.2;
+        spawnRipples(clock, dt, R);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.clearRect(0, 0, W, H);
+        (view === "orb" ? drawOrb : view === "waves" ? drawWaves : drawRing)(
+          clock,
+          cx,
+          cy,
+          R,
+        );
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      function setPressed(group, attr, val) {}
+      function setState(s) {
+        state = s;
+        statusEl.innerHTML = LABELS[s];
+        setPressed(document.getElementById("states"), "s", s);
+      }
+
+      const states = ["idle", "listening", "thinking", "speaking"];
+      let currentStateIndex = 0;
+
+      const styles = ["orb", "waves", "ring"];
+      let currentStyleIndex = 0;
+
+      function NextState() {
+        currentStateIndex = (currentStateIndex + 1) % states.length;
+        setState(states[currentStateIndex]);
+      }
+
+      function setView(v) {
+        view = v;
+        setPressed(document.getElementById("styles"), "v", v);
+      }
+
+      function NextStyle() {
+        currentStyleIndex = (currentStyleIndex + 1) % styles.length;
+        setView(styles[currentStyleIndex]);
+      }
+
+      document.getElementById("states-change").onclick = () => {
+        NextState();
+      };
+      document.getElementById("styles-change").onclick = () => {
+        NextStyle();
+      };
+
+      // Start webcam stream
+      const cam = document.getElementById("cam");
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({ video: true })
+          .then((stream) => {
+            cam.srcObject = stream;
+          })
+          .catch((err) => {
+            console.error("Error accessing webcam:", err);
+          });
+      } else {
+        console.warn("getUserMedia not supported in this browser");
+      }
+      let camVisible = false;
+      document.getElementById("video-change").onclick = () => {
+        camVisible = !camVisible;
+        document.getElementById("cosas").style.display = camVisible
+          ? "block"
+          : "none";
+        resize();
+      };
+
+      document.getElementById("title").onclick = () => {
+        /**
+         * Toggle full screen
+         */
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
+        resize();
+      };
+      setState("idle");
+    </script>
+  </body>
+</html>
