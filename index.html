@@ -574,13 +574,12 @@
           const videoInputs = devices.filter((d) => d.kind === "videoinput");
           cameraButtons.innerHTML = "";
           const defaultBtn = document.createElement("button");
-          defaultBtn.textContent = "Cámara predeterminada";
+          defaultBtn.textContent = "Cam-0";
           defaultBtn.onclick = () => startCamera();
           cameraButtons.appendChild(defaultBtn);
-          videoInputs.forEach((device) => {
+          videoInputs.forEach((device, i) => {
             const btn = document.createElement("button");
-            btn.textContent =
-              device.label || `Cámara ${cameraButtons.children.length}`;
+            btn.textContent = device.label || `Cam-${i + 1}`;
             btn.onclick = () => startCamera(device.deviceId);
             cameraButtons.appendChild(btn);
           });
