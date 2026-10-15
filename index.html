@@ -147,6 +147,7 @@
       <div id="status" aria-live="polite"></div>
     </div>
     <div class="cosas" id="cosas" style="display: none">
+      <div id="camera-buttons" style="margin-top: 8px"></div>
       <video id="cam" class="video" autoplay muted playsinline></video>
     </div>
     <div class="bar">
@@ -564,20 +565,57 @@
         NextStyle();
       };
 
-      // Start webcam stream
-      const cam = document.getElementById("cam");
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices
-          .getUserMedia({ video: true })
-          .then((stream) => {
-            cam.srcObject = stream;
-          })
-          .catch((err) => {
-            console.error("Error accessing webcam:", err);
+      // Populate camera buttons container
+      const cameraButtons = document.getElementById("camera-buttons");
+
+      async function populateCameraButtons() {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoInputs = devices.filter((d) => d.kind === "videoinput");
+          cameraButtons.innerHTML = "";
+          const defaultBtn = document.createElement("button");
+          defaultBtn.textContent = "Cámara predeterminada";
+          defaultBtn.onclick = () => startCamera();
+          cameraButtons.appendChild(defaultBtn);
+          videoInputs.forEach((device) => {
+            const btn = document.createElement("button");
+            btn.textContent =
+              device.label || `Cámara ${cameraButtons.children.length}`;
+            btn.onclick = () => startCamera(device.deviceId);
+            cameraButtons.appendChild(btn);
           });
+        } catch (e) {
+          console.warn("No se pudo enumerar las cámaras:", e);
+        }
+      }
+
+      // Start webcam stream with optional deviceId
+      let currentStream = null;
+      async function startCamera(deviceId) {
+        if (currentStream) {
+          currentStream.getTracks().forEach((t) => t.stop());
+        }
+        const constraints = deviceId
+          ? { video: { deviceId: { exact: deviceId } } }
+          : { video: true };
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          currentStream = stream;
+          cam.srcObject = stream;
+        } catch (err) {
+          console.error("Error accessing webcam:", err);
+        }
+      }
+
+      // Initial setup
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        populateCameraButtons();
+        startCamera();
       } else {
         console.warn("getUserMedia not supported in this browser");
       }
+
+      // Existing video toggle button functionality remains unchanged
       let camVisible = false;
       document.getElementById("video-change").onclick = () => {
         camVisible = !camVisible;
